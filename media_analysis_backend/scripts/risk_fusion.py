@@ -69,3 +69,6 @@ def segment_risk_scores(
         segment_risks.append(risk)
 
     return segment_risks
+
+
+    
