@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import os
 
 def gan_frequency_risk(video_path, max_frames=120):
     """
@@ -7,10 +8,16 @@ def gan_frequency_risk(video_path, max_frames=120):
     Returns a risk score between 0 and 1.
     """
 
+    # ---------- PATH CHECK ----------
+    if not os.path.exists(video_path):
+        print("❌ Video file not found:", video_path)
+        return 0.0
+
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
-        raise IOError("Cannot open video file")
+        print("❌ OpenCV cannot open the video")
+        return 0.0
 
     fft_energies = []
     frame_count = 0
@@ -23,22 +30,21 @@ def gan_frequency_risk(video_path, max_frames=120):
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Resize for consistency and speed
+        # Resize for stable FFT
         gray = cv2.resize(gray, (256, 256))
 
-        # Apply 2D FFT
+        # 2D FFT
         fft = np.fft.fft2(gray)
         fft_shift = np.fft.fftshift(fft)
         magnitude = np.log(np.abs(fft_shift) + 1e-8)
 
         # Radial frequency analysis
         h, w = magnitude.shape
-        center_y, center_x = h // 2, w // 2
+        cy, cx = h // 2, w // 2
 
         y, x = np.ogrid[:h, :w]
-        radius = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        radius = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
 
-        # High-frequency mask
         high_freq_mask = radius > min(h, w) * 0.25
 
         high_freq_energy = np.mean(magnitude[high_freq_mask])
@@ -49,29 +55,19 @@ def gan_frequency_risk(video_path, max_frames=120):
 
     cap.release()
 
-    fft_energies = np.array(fft_energies)
-
-    if len(fft_energies) < 10:
+    if len(fft_energies) < 20:
+        print("⚠️ Not enough visual data for frequency analysis")
         return 0.0
 
-    # Measure unnatural consistency of frequency energy
+    fft_energies = np.array(fft_energies)
+
     energy_std = np.std(fft_energies)
     energy_mean = np.mean(fft_energies)
 
-    # GANs tend to produce stable, repetitive frequency patterns
+    # GANs often produce overly consistent frequency patterns
     consistency_score = energy_mean / (energy_std + 1e-6)
 
     # Normalize to 0–1
     risk_score = np.clip((consistency_score - 1.0) / 3.0, 0, 1)
 
     return float(risk_score)
-
-
-# -------------------------------
-# Example usage
-# -------------------------------
-if __name__ == "__main__":
-    VIDEO_PATH = "media_analysis_backend/scripts/smple.mp4"
-
-    score = gan_frequency_risk(VIDEO_PATH)
-    print(f"\nGAN Frequency Risk Score: {score:.2f}")

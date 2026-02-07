@@ -6,42 +6,40 @@ face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# Get absolute path of THIS script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+def detect_face(IMAGE_PATH):
+    print("Looking for image at:", IMAGE_PATH)
 
-# Image path (must be in same folder as this file)
-IMAGE_PATH = os.path.join(SCRIPT_DIR, "face.jpg")
+    # Read image safely
+    img = cv2.imread(IMAGE_PATH)
 
-print("Looking for image at:", IMAGE_PATH)
+    # Check if image loaded
+    if img is None:
+        print("❌ ERROR: Image not found or cannot be opened")
+        return
 
-# Read image safely
-img = cv2.imread(IMAGE_PATH)
+    print("✅ Image loaded successfully")
 
-# Check if image loaded
-if img is None:
-    print("❌ ERROR: Image not found or cannot be opened")
-    exit()
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-print("✅ Image loaded successfully")
+    # Detect faces
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.3,
+        minNeighbors=5
+    )
 
-# Convert to grayscale
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    print(f"Detected {len(faces)} face(s)")
 
-# Detect faces
-faces = face_cascade.detectMultiScale(
-    gray,
-    scaleFactor=1.3,
-    minNeighbors=5
-)
+    # Draw rectangles around faces
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
-print(f"Detected {len(faces)} face(s)")
+    # Save output
+    output_dir = "outputs"
+    os.makedirs(output_dir, exist_ok=True)
 
-# Draw rectangles around faces
-for (x, y, w, h) in faces:
-    cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    output_path = os.path.join(output_dir, "face_output.jpg")
+    cv2.imwrite(output_path, img)
 
-# Save output instead of showing (more reliable in VS Code)
-OUTPUT_PATH = os.path.join(SCRIPT_DIR, "face_output.jpg")
-cv2.imwrite(OUTPUT_PATH, img)
-
-print("✅ Output saved to:", OUTPUT_PATH)
+    print("✅ Output saved to:", output_path)
