@@ -1,115 +1,91 @@
 import cv2
-import os
 import numpy as np
 
-# -------------------------------
-# Paths (absolute, VS Code safe)
-# -------------------------------
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_PATH = os.path.join(SCRIPT_DIR, "smple.mp4")
+VIDEO_PATH = "scripts/smple.mp4"
 
-# -------------------------------
-# Parameters
-# -------------------------------
-FPS_ASSUMED = 30          # Approx FPS
-MIN_FRAMES = 150          # ~5 seconds
-HR_LOW = 0.8              # Hz (48 BPM)
-HR_HIGH = 3.0             # Hz (180 BPM)
-
-# -------------------------------
 # Load face detector
-# -------------------------------
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# -------------------------------
-# Step 1: Load video
-# -------------------------------
 cap = cv2.VideoCapture(VIDEO_PATH)
 
 if not cap.isOpened():
-    print("❌ Cannot open video:", VIDEO_PATH)
-    exit()
+    raise IOError("Cannot open video")
 
 green_signal = []
 frame_count = 0
+face_found_frames = 0
 
-# -------------------------------
-# Step 2: Process frames
-# -------------------------------
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
     frame_count += 1
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+    # More forgiving face detection
     faces = face_cascade.detectMultiScale(
         gray,
-        scaleFactor=1.3,
-        minNeighbors=5
+        scaleFactor=1.1,
+        minNeighbors=3,
+        minSize=(60, 60)
     )
 
     if len(faces) == 0:
         continue
 
-    # Use the largest detected face
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    face_roi = frame[y:y+h, x:x+w]
+    # Pick largest face
+    x, y, w, h = max(faces, key=lambda b: b[2] * b[3])
+    face_found_frames += 1
 
-    # Green channel averaging
-    green = face_roi[:, :, 1]
-    green_signal.append(np.mean(green))
+    # Forehead ROI (best for rPPG)
+    roi_y1 = y
+    roi_y2 = y + h // 4
+    roi_x1 = x + w // 4
+    roi_x2 = x + 3 * w // 4
+
+    roi = frame[roi_y1:roi_y2, roi_x1:roi_x2]
+
+    if roi.size == 0:
+        continue
+
+    # Extract green channel mean
+    green_mean = np.mean(roi[:, :, 1])
+    green_signal.append(green_mean)
 
 cap.release()
 
 print(f"Frames processed: {frame_count}")
+print(f"Frames with face detected: {face_found_frames}")
 print(f"Signal length: {len(green_signal)}")
 
-if len(green_signal) < MIN_FRAMES:
+# -------------------------------
+# rPPG analysis
+# -------------------------------
+if len(green_signal) < 60:
     print("❌ Not enough frames for rPPG analysis")
     exit()
 
-# -------------------------------
-# Step 3: rPPG signal processing
-# -------------------------------
 signal = np.array(green_signal)
+signal = (signal - signal.mean()) / (signal.std() + 1e-6)
 
-# Remove DC component
-signal = signal - np.mean(signal)
+fft = np.abs(np.fft.rfft(signal))
+freqs = np.fft.rfftfreq(len(signal), d=1 / 30)
 
-# FFT
-fft_vals = np.abs(np.fft.rfft(signal))
-freqs = np.fft.rfftfreq(len(signal), d=1.0 / FPS_ASSUMED)
+# Human heart rate band (0.75–3 Hz)
+mask = (freqs >= 0.75) & (freqs <= 3.0)
 
-# Heart-rate frequency band
-band_mask = (freqs >= HR_LOW) & (freqs <= HR_HIGH)
-band_fft = fft_vals[band_mask]
-
-if len(band_fft) == 0:
+if np.sum(mask) == 0:
     print("❌ No valid frequency band detected")
     exit()
 
-# -------------------------------
-# Step 4: Pulse consistency
-# -------------------------------
-peak_power = np.max(band_fft)
-total_power = np.sum(band_fft) + 1e-6
+pulse_strength = np.max(fft[mask]) / (np.mean(fft) + 1e-6)
 
-pulse_consistency = peak_power / total_power
-pulse_consistency = float(np.clip(pulse_consistency, 0.0, 1.0))
+# Normalize to 0–1 risk
+risk_score = np.clip(1 - pulse_strength / 5.0, 0, 1)
 
-# -------------------------------
-# Step 5: Risk score (0–1)
-# -------------------------------
-risk_score = 1.0 - pulse_consistency
-risk_score = float(np.clip(risk_score, 0.0, 1.0))
+print(f"❤️ rPPG Risk Score: {risk_score:.2f}")
 
-# -------------------------------
-# Results
-# -------------------------------
-print("\n--- rPPG Analysis Result ---")
-print(f"Pulse consistency : {pulse_consistency:.3f}")
-print(f"Risk score        : {risk_score:.3f}")
